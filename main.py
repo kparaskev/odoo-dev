@@ -1,4 +1,4 @@
-import argparse
+import argparse,json
 from odoo_dev.config import load_config, inject_odoo_paths
 from odoo_dev.rpc import OdooRPC
 from odoo_dev.analyzer import OdooAnalyzer
@@ -34,6 +34,8 @@ def main() -> None:
     if missing:
         print("  " + ", ".join(missing[:10]) + ("…" if len(missing) > 10 else ""))
 
-
+    result = analyzer.parse_module_models("sale")
+    print(json.dumps(result, indent=4))
+    
 if __name__ == "__main__":
     main()

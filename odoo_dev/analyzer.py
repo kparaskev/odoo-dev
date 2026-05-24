@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import OdooConfig
+from .model_parser import OdooModelVisitor
 from .rpc import OdooRPC
 
 # Fields fetched from ir.module.module for installed remote modules
@@ -80,6 +81,34 @@ class OdooAnalyzer:
         """Names of remote-installed modules with no local source found."""
         local = self.local_module_names()
         return sorted(n for n in self.remote_module_names() if n not in local)
+
+    def parse_module_models(self, module_name: str) -> list[dict]:
+        """Parse all Python files in *module_name* and return discovered Odoo models.
+
+        Looks up the module path from the local-modules cache, walks every .py
+        file, runs OdooModelVisitor on each, then prints a human-readable summary.
+        """
+        module = self.get_local_module(module_name)
+        if module is None:
+            print(f"Module '{module_name}' not found in local modules cache.")
+            return []
+
+        module_path = Path(module["path"])
+        visitor = OdooModelVisitor()
+
+        py_files = sorted(module_path.rglob("*.py"))
+        for py_file in py_files:
+            try:
+                source = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(source)
+                visitor.current_file = str(py_file)
+                visitor.visit(tree)
+            except SyntaxError as exc:
+                print(f"  [warn] syntax error in {py_file}: {exc}")
+            except Exception as exc:
+                print(f"  [warn] could not parse {py_file}: {exc}")
+        
+        return visitor.models
 
     # ------------------------------------------------------------------
     # Cache management

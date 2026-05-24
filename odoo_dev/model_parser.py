@@ -1,7 +1,5 @@
-import os
 import ast
-import logging
-import xml.etree.ElementTree as ET
+
 
 class OdooModelVisitor(ast.NodeVisitor):
     def __init__(self):
