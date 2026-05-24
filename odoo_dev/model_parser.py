@@ -20,6 +20,7 @@ class OdooModelVisitor(ast.NodeVisitor):
         model_info = {
             "class_name": node.name,
             "model_name": None,
+            "has_explicit_name": False,
             "inherit": None,
             "description": None,
             "fields": {},
@@ -34,6 +35,7 @@ class OdooModelVisitor(ast.NodeVisitor):
                     if isinstance(target, ast.Name):
                         if target.id == '_name':
                             model_info["model_name"] = self._get_value_literal(item.value)
+                            model_info["has_explicit_name"] = True
                             has_odoo_attrs = True
                         elif target.id == '_inherit':
                             model_info["inherit"] = self._get_value_literal(item.value)

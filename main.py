@@ -34,7 +34,7 @@ def main() -> None:
     if missing:
         print("  " + ", ".join(missing[:10]) + ("…" if len(missing) > 10 else ""))
 
-    result = analyzer.parse_module_models("sale")
+    result = analyzer.find_model_implementations("sale.order")
     print(json.dumps(result, indent=4))
     
 if __name__ == "__main__":

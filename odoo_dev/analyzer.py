@@ -82,6 +82,36 @@ class OdooAnalyzer:
         local = self.local_module_names()
         return sorted(n for n in self.remote_module_names() if n not in local)
 
+    def find_model_implementations(self, model_name: str) -> list[dict]:
+        """Search every installed+local module for classes that define or extend *model_name*.
+
+        Returns a list of dicts, one per matching class:
+          module     – addon name
+          source     – 'odoo' | 'enterprise' | 'custom'
+          file_path  – absolute path to the Python file
+          class_name – Python class name
+          relation   – 'define' (_name set explicitly) or 'extend' (only _inherit set)
+        """
+        candidates = self.installed_and_local()
+        print(f"Scanning {len(candidates)} installed+local module(s) for '{model_name}'…")
+
+        results: list[dict] = []
+        for module in candidates:
+            for m in self.parse_module_models(module["name"]):
+                if m["model_name"] != model_name:
+                    continue
+                relation = "define" if m["has_explicit_name"] else "extend"
+                results.append({
+                    "module": module["name"],
+                    "source": module["source"],
+                    "file_path": m["file_path"],
+                    "class_name": m["class_name"],
+                    "relation": relation,
+                })
+        #uncomment to print a human-readable summary of the results
+        #_print_model_implementations(model_name, results)
+        return results
+
     def parse_module_models(self, module_name: str) -> list[dict]:
         """Parse all Python files in *module_name* and return discovered Odoo models.
 
@@ -220,3 +250,23 @@ def _save_json(path: Path, data: list) -> None:
 def _load_json(path: Path) -> list:
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)["data"]
+
+
+def _print_model_implementations(model_name: str, results: list[dict]) -> None:
+    bar = "─" * 60
+    print(f"\n{bar}")
+    print(f"Model : {model_name}  —  {len(results)} implementation(s) found")
+    print(bar)
+    if not results:
+        print("  (none found among installed+local modules)")
+    else:
+        defines = [r for r in results if r["relation"] == "define"]
+        extends = [r for r in results if r["relation"] == "extend"]
+        for label, group in (("define", defines), ("extend", extends)):
+            if not group:
+                continue
+            print(f"\n  {label.upper()} ({len(group)})")
+            for r in group:
+                print(f"    [{r['source']:>10}]  {r['module']:<40}  {r['class_name']}")
+                print(f"               {r['file_path']}")
+    print(f"\n{bar}\n")
