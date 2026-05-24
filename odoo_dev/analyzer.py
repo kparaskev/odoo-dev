@@ -82,8 +82,16 @@ class OdooAnalyzer:
         local = self.local_module_names()
         return sorted(n for n in self.remote_module_names() if n not in local)
 
-    def find_model_implementations(self, model_name: str) -> list[dict]:
-        """Search every installed+local module for classes that define or extend *model_name*.
+    def find_model_implementations(
+        self,
+        model_name: str,
+        mro_source_model: str | None = None,
+    ) -> list[dict]:
+        """Search installed+local modules for classes that define or extend *model_name*.
+
+        When *mro_source_model* is given, get_true_mro is called on that model first
+        to restrict the search to only modules in the inheritance chain. Falls back to
+        scanning all installed+local modules if the server method is unavailable.
 
         Returns a list of dicts, one per matching class:
           module     – addon name
@@ -93,7 +101,17 @@ class OdooAnalyzer:
           relation   – 'define' (_name set explicitly) or 'extend' (only _inherit set)
         """
         candidates = self.installed_and_local()
-        print(f"Scanning {len(candidates)} installed+local module(s) for '{model_name}'…")
+
+        if mro_source_model is not None:
+            try:
+                mro_list = self._rpc.get_true_mro(mro_source_model, model_name)
+                local_map = {m["name"]: m for m in candidates}
+                candidates = [local_map[name] for name in mro_list if name in local_map]
+                print(f"MRO filter: {len(candidates)} module(s) in chain for '{model_name}'")
+            except RuntimeError as exc:
+                print(f"[warn] get_true_mro unavailable, falling back to full scan: {exc}")
+
+        print(f"Scanning {len(candidates)} module(s) for '{model_name}'…")
 
         results: list[dict] = []
         for module in candidates:
@@ -108,8 +126,7 @@ class OdooAnalyzer:
                     "class_name": m["class_name"],
                     "relation": relation,
                 })
-        #uncomment to print a human-readable summary of the results
-        #_print_model_implementations(model_name, results)
+
         return results
 
     def parse_module_models(self, module_name: str) -> list[dict]:
