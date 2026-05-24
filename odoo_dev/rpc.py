@@ -97,3 +97,20 @@ class OdooRPC:
         if attributes:
             kwargs["attributes"] = attributes
         return self.execute(model, "fields_get", **kwargs)
+
+    def get_true_mro(self, model: str, target_model: str) -> list[str]:
+        """Call get_true_mro(target_model) on *model* and return the ordered list
+        of module names in the inheritance chain for *target_model*.
+
+        Raises RuntimeError if the method is not available on the server.
+        """
+        try:
+            return self.execute(model, "get_true_mro", target_model)
+        except xmlrpc.client.Fault as exc:
+            msg = str(exc)
+            if "AttributeError" in msg or "get_true_mro" in msg:
+                raise RuntimeError(
+                    f"get_true_mro is not available on model '{model}'. "
+                    "Ensure the server has this method installed."
+                ) from exc
+            raise
