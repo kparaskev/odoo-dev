@@ -34,9 +34,12 @@ def main() -> None:
     if missing:
         print("  " + ", ".join(missing[:10]) + ("…" if len(missing) > 10 else ""))
 
-    result = analyzer.lookup_model("sale.order")
+    #result = analyzer.lookup_model("sale.order")
+    #methods = analyzer.build_model_methods("sale.order")
+    
+    methods = analyzer.load_model_methods("sale.order")    
     #result = analyzer.find_model_implementations("sale.order", "grid")
-    print(json.dumps(result, indent=4))
+    print(json.dumps(methods, indent=4))
     #modules = rpc.get_true_mro("grid", "sale.order")
     #print(modules)                               
     #result = analyzer.parse_module_models("sale_management")

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import OdooConfig
-from .model_parser import OdooModelIndexVisitor, OdooModelVisitor
+from .model_parser import OdooModelIndexVisitor, OdooModelMethodVisitor, OdooModelVisitor
 from .rpc import OdooRPC
 
 # Fields fetched from ir.module.module for installed remote modules
@@ -230,6 +230,84 @@ class OdooAnalyzer:
         Returns an empty dict when the model is not found.
         """
         return self.load_model_index().get(model_name, {})
+
+    def build_model_methods(
+        self, model_name: str, force: bool = False
+    ) -> dict[str, list[dict]]:
+        """Build and persist a method index for *model_name*.
+
+        Uses the model index to find only the files that define or extend
+        *model_name*, parses them with the lightweight OdooModelMethodVisitor,
+        and saves the result to ``<data_path>/<model_name>.methods.json``.
+
+        Returns a dict keyed by method name; each value is a list of
+        occurrences (one per module/file that defines that method)::
+
+            {
+              "action_confirm": [
+                {
+                  "module":     "sale",
+                  "file":       "/abs/path/sale_order.py",
+                  "class_name": "SaleOrder",
+                  "args":       ["self"],
+                  "decorators": ["api.multi"],
+                }
+              ],
+              ...
+            }
+
+        Pass *force=True* to rebuild even when the cache file already exists.
+        """
+        methods_file = self._data_path / f"{model_name}.methods.json"
+        if not force and methods_file.exists():
+            data = _load_json(methods_file)
+            print(f"Loaded method index for '{model_name}' from cache ({methods_file})")
+            return data
+
+        locations = self.lookup_model(model_name)
+        if not locations:
+            print(f"Model '{model_name}' not found in index. Run build_model_index() first.")
+            return {}
+
+        total_files = sum(len(files) for files in locations.values())
+        print(f"Building method index for '{model_name}' ({total_files} file(s) across {len(locations)} module(s))…")
+
+        methods: dict[str, list[dict]] = {}
+        for module_name, file_paths in locations.items():
+            for file_path in file_paths:
+                visitor = OdooModelMethodVisitor(model_name)
+                try:
+                    source = Path(file_path).read_text(encoding="utf-8")
+                    tree = ast.parse(source)
+                    visitor.current_file = file_path
+                    visitor.visit(tree)
+                except Exception:
+                    continue
+                for m in visitor.methods:
+                    methods.setdefault(m["name"], []).append({
+                        "module": module_name,
+                        "file": file_path,
+                        "class_name": m["class_name"],
+                        "args": m["args"],
+                        "decorators": m["decorators"],
+                    })
+
+        _save_json(methods_file, methods)
+        print(f"  → {len(methods)} method(s) indexed, saved to {methods_file}")
+        return methods
+
+    def load_model_methods(self, model_name: str) -> dict[str, list[dict]]:
+        """Load the method index for *model_name* from disk.
+
+        Raises FileNotFoundError if build_model_methods() has not been called yet.
+        """
+        methods_file = self._data_path / f"{model_name}.methods.json"
+        if not methods_file.exists():
+            raise FileNotFoundError(
+                f"Method index for '{model_name}' not found at {methods_file}."
+                " Call build_model_methods() first."
+            )
+        return _load_json(methods_file)
 
     # ------------------------------------------------------------------
     # Cache management

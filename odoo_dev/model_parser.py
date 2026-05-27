@@ -1,6 +1,23 @@
 import ast
 
 
+def _decorator_name(dec_node) -> str:
+    if isinstance(dec_node, ast.Name):
+        return dec_node.id
+    if isinstance(dec_node, ast.Attribute):
+        parts = []
+        cur = dec_node
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+        return ".".join(reversed(parts))
+    if isinstance(dec_node, ast.Call):
+        return _decorator_name(dec_node.func)
+    return "unknown"
+
+
 class OdooModelVisitor(ast.NodeVisitor):
     def __init__(self):
         self.models = []
@@ -209,3 +226,63 @@ class OdooModelIndexVisitor(ast.NodeVisitor):
         if self.current_file:
             for model_name in models:
                 self.entries.append((model_name, self.current_file))
+
+
+class OdooModelMethodVisitor(ast.NodeVisitor):
+    """Extracts methods from classes that define or extend *target_model*.
+
+    Only visits classes whose ``_name`` matches *target_model* or whose
+    ``_inherit`` includes it.  Each item in *methods* is::
+
+        {
+          "class_name": str,
+          "name":       str,   # Python method name
+          "args":       list[str],
+          "decorators": list[str],
+        }
+
+    The caller is responsible for attaching module / file context.
+    """
+
+    def __init__(self, target_model: str) -> None:
+        self.target_model = target_model
+        self.methods: list[dict] = []
+        self.current_file: str | None = None
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        name_val = None
+        inherit_val = None
+        for item in node.body:
+            if not isinstance(item, ast.Assign):
+                continue
+            for target in item.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if target.id == "_name" and name_val is None:
+                    try:
+                        name_val = ast.literal_eval(item.value)
+                    except Exception:
+                        pass
+                elif target.id == "_inherit" and inherit_val is None:
+                    try:
+                        inherit_val = ast.literal_eval(item.value)
+                    except Exception:
+                        pass
+
+        relates = (
+            name_val == self.target_model
+            or inherit_val == self.target_model
+            or (isinstance(inherit_val, list) and self.target_model in inherit_val)
+        )
+        if not relates:
+            self.generic_visit(node)
+            return
+
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.methods.append({
+                    "class_name": node.name,
+                    "name": item.name,
+                    "args": [arg.arg for arg in item.args.args],
+                    "decorators": [_decorator_name(d) for d in item.decorator_list],
+                })
