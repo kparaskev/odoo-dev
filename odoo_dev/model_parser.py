@@ -148,3 +148,64 @@ class OdooModelVisitor(ast.NodeVisitor):
         elif isinstance(dec_node, ast.Call):
             return self._get_decorator_name(dec_node.func)
         return "unknown"
+
+
+class OdooModelIndexVisitor(ast.NodeVisitor):
+    """Minimal visitor that collects (model_name, file_path) pairs only.
+
+    Much faster than OdooModelVisitor — skips fields, methods, and decorators.
+    Each entry in *entries* represents one (model, file) relationship; a class
+    that uses _inherit = ['a', 'b'] produces two entries, one per model.
+    """
+
+    def __init__(self):
+        self.entries: list[tuple[str, str]] = []
+        self.current_file: str | None = None
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        is_odoo_base = False
+        for base in node.bases:
+            if isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name):
+                if base.value.id == "models" and base.attr in (
+                    "Model", "TransientModel", "AbstractModel"
+                ):
+                    is_odoo_base = True
+            elif isinstance(base, ast.Name):
+                if base.id in ("Model", "TransientModel", "AbstractModel"):
+                    is_odoo_base = True
+
+        name_val = None
+        inherit_val = None
+        for item in node.body:
+            if not isinstance(item, ast.Assign):
+                continue
+            for target in item.targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if target.id == "_name" and name_val is None:
+                    try:
+                        name_val = ast.literal_eval(item.value)
+                    except Exception:
+                        pass
+                elif target.id == "_inherit" and inherit_val is None:
+                    try:
+                        inherit_val = ast.literal_eval(item.value)
+                    except Exception:
+                        pass
+
+        if not (is_odoo_base or name_val is not None or inherit_val is not None):
+            self.generic_visit(node)
+            return
+
+        if name_val:
+            models = [name_val]
+        elif isinstance(inherit_val, str):
+            models = [inherit_val]
+        elif isinstance(inherit_val, list):
+            models = [m for m in inherit_val if isinstance(m, str)]
+        else:
+            models = []
+
+        if self.current_file:
+            for model_name in models:
+                self.entries.append((model_name, self.current_file))

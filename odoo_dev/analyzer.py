@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import OdooConfig
-from .model_parser import OdooModelVisitor
+from .model_parser import OdooModelIndexVisitor, OdooModelVisitor
 from .rpc import OdooRPC
 
 # Fields fetched from ir.module.module for installed remote modules
@@ -22,6 +22,7 @@ _REMOTE_MODULE_FIELDS = [
 
 _REMOTE_FILE = "remote_modules.json"
 _LOCAL_FILE = "local_modules.json"
+_INDEX_FILE = "model_index.json"
 
 
 class OdooAnalyzer:
@@ -43,6 +44,7 @@ class OdooAnalyzer:
 
         self._remote_modules: list[dict] = []
         self._local_modules: list[dict] = []
+        self._model_index: dict[str, dict[str, list[str]]] | None = None
 
         self._load_or_build(force)
 
@@ -156,6 +158,78 @@ class OdooAnalyzer:
                 print(f"  [warn] could not parse {py_file}: {exc}")
         
         return visitor.models
+
+    def build_model_index(self, force: bool = False) -> dict[str, dict[str, list[str]]]:
+        """Scan all local modules and build a model→module→files index.
+
+        The index is persisted to *data_path/model_index.json* and cached
+        in-memory so subsequent calls are instant.  Pass *force=True* to
+        rebuild even when the file already exists.
+
+        Structure::
+
+            {
+              "sale.order": {
+                "sale":        ["/path/sale/models/sale_order.py"],
+                "sale_stock":  ["/path/sale_stock/models/sale_order.py"],
+              },
+              ...
+            }
+        """
+        index_file = self._data_path / _INDEX_FILE
+        if not force and index_file.exists():
+            self._model_index = _load_json(index_file)
+            print(f"Loaded model index from cache ({index_file})")
+            return self._model_index
+
+        print(f"Building model index across {len(self._local_modules)} module(s)…")
+        index: dict[str, dict[str, list[str]]] = {}
+
+        for module in self._local_modules:
+            module_name = module["name"]
+            module_path = Path(module["path"])
+            visitor = OdooModelIndexVisitor()
+
+            for py_file in sorted(module_path.rglob("*.py")):
+                try:
+                    source = py_file.read_text(encoding="utf-8")
+                    tree = ast.parse(source)
+                    visitor.current_file = str(py_file)
+                    visitor.visit(tree)
+                except SyntaxError:
+                    pass
+                except Exception:
+                    pass
+
+            for model_name, file_path in visitor.entries:
+                index.setdefault(model_name, {}).setdefault(module_name, []).append(file_path)
+
+        _save_json(index_file, index)
+        self._model_index = index
+        print(f"  → {len(index)} model(s) indexed, saved to {index_file}")
+        return index
+
+    def load_model_index(self) -> dict[str, dict[str, list[str]]]:
+        """Return the in-memory index, loading from disk if needed.
+
+        Raises FileNotFoundError if the index has never been built.
+        """
+        if self._model_index is not None:
+            return self._model_index
+        index_file = self._data_path / _INDEX_FILE
+        if not index_file.exists():
+            raise FileNotFoundError(
+                f"Model index not found at {index_file}. Call build_model_index() first."
+            )
+        self._model_index = _load_json(index_file)
+        return self._model_index
+
+    def lookup_model(self, model_name: str) -> dict[str, list[str]]:
+        """Return ``{module: [file_paths]}`` for *model_name* from the index.
+
+        Returns an empty dict when the model is not found.
+        """
+        return self.load_model_index().get(model_name, {})
 
     # ------------------------------------------------------------------
     # Cache management

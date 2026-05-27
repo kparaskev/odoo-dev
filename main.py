@@ -28,13 +28,14 @@ def main() -> None:
     print(f"  enterprise : {sum(1 for m in analyzer.local_modules if m['source'] == 'enterprise')}")
     print(f"  custom     : {sum(1 for m in analyzer.local_modules if m['source'] == 'custom')}")
     print(f"\nInstalled + local source : {len(analyzer.installed_and_local())}")
-
+    
     missing = analyzer.installed_but_not_local()
     print(f"Installed but no local source : {len(missing)}")
     if missing:
         print("  " + ", ".join(missing[:10]) + ("…" if len(missing) > 10 else ""))
 
-    result = analyzer.find_model_implementations("sale.order", "grid")
+    result = analyzer.lookup_model("sale.order")
+    #result = analyzer.find_model_implementations("sale.order", "grid")
     print(json.dumps(result, indent=4))
     #modules = rpc.get_true_mro("grid", "sale.order")
     #print(modules)                               
